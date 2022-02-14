@@ -181,12 +181,19 @@ static void report_subcommand(void) {
 }
 
 int main(int argc, char** argv) {
-  if (strcmp(argv[1], "list") == 0) {
-    list_subcommand();
-  } else if (strcmp(argv[1], "report") == 0) {
-    report_subcommand();
+  if (argc > 1) {
+    if (strcmp(argv[1], "list") == 0) {
+      list_subcommand();
+    } else if (strcmp(argv[1], "report") == 0) {
+      report_subcommand();
+    } else {
+      fprintf(stderr, "`%s` unknown command\n", argv[1]);
+      return 1;
+    }
   } else {
-    fprintf(stderr, "`%s` unknown command\n", argv[1]);
+    fprintf(stderr,
+            "snitch [opt]\n\tlist: list all possible subcommands\n\treport: "
+            "report an issue to github\n");
     return 1;
   }
 }
