@@ -224,6 +224,7 @@ static bool walk_todos_of_file(const char* file_path, todo_visitor_t visit,
     free(todo);
   }
   free(line);
+  fclose(fp);
   return true;
 }
 
