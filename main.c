@@ -375,7 +375,7 @@ int main(int argc, char** argv, char** envp) {
         fprintf(stderr, "Not enough arguments\n");
         return 1;
       }
-      // TODO: github repo is not automatically derived from the git repo
+      // TODO(#9): github repo is not automatically derived from the git repo
       report_subcommand(creds.value, argv[2]);
     } else {
       fprintf(stderr, "`%s` unknown command\n", argv[1]);
