@@ -80,7 +80,7 @@ static todo_t* line_as_todo(struct string_span line) {
   int errcode;
   PCRE2_SIZE errofs;
   pcre2_code* unreported_todo_pattern =
-      pcre2_compile((PCRE2_SPTR) "(.*)TODO: (.*)", PCRE2_ZERO_TERMINATED, 0,
+      pcre2_compile((PCRE2_SPTR) "^(.*)TODO: (.*)$", PCRE2_ZERO_TERMINATED, 0,
                     &errcode, &errofs, NULL);
   if (unreported_todo_pattern == NULL) {
     PCRE2_UCHAR errbuf[128];
@@ -91,8 +91,7 @@ static todo_t* line_as_todo(struct string_span line) {
   pcre2_match_data* match_data =
       pcre2_match_data_create_from_pattern(unreported_todo_pattern, NULL);
   if ((errcode = pcre2_match(unreported_todo_pattern, (PCRE2_SPTR)line.data,
-                             line.length, 0, PCRE2_ANCHORED | PCRE2_ENDANCHORED,
-                             match_data, NULL)) < 0) {
+                             line.length, 0, 0, match_data, NULL)) < 0) {
     if (errcode != PCRE2_ERROR_NOMATCH) {
       PCRE2_UCHAR errbuf[128];
       pcre2_get_error_message(errcode, errbuf, sizeof errbuf);
