@@ -76,25 +76,30 @@ typedef struct {
   todos_t todos;
 } maybe_todos_t;
 
-static todo_t* line_as_todo(struct string_span line) {
-  // TODO(#1): line_as_todo does not support reported TODOs.
-  // TODO(#2): line_as_todo has false positives inside binary files and string
-  // literals.
+static pcre2_code* regex_must_compile(const char* regex) {
   int errcode;
   PCRE2_SIZE errofs;
-  pcre2_code* unreported_todo_pattern =
-      pcre2_compile((PCRE2_SPTR) "^(.*)TODO: (.*)$", PCRE2_ZERO_TERMINATED, 0,
-                    &errcode, &errofs, NULL);
-  if (unreported_todo_pattern == NULL) {
+  pcre2_code* code = pcre2_compile((PCRE2_SPTR)regex, PCRE2_ZERO_TERMINATED, 0,
+                                   &errcode, &errofs, NULL);
+  if (code == NULL) {
     PCRE2_UCHAR errbuf[128];
     pcre2_get_error_message(errcode, errbuf, sizeof errbuf);
     fprintf(stderr, "Compiling TODO pattern: %s\n", errbuf);
     return NULL;
   }
+  return code;
+}
+
+static todo_t* line_as_unreported_todo(struct string_span line) {
+  pcre2_code* unreported_todo_pattern = regex_must_compile("^(.*)TODO: (.*)$");
+  if (unreported_todo_pattern == NULL) {
+    return NULL;
+  }
   pcre2_match_data* match_data =
       pcre2_match_data_create_from_pattern(unreported_todo_pattern, NULL);
-  if ((errcode = pcre2_match(unreported_todo_pattern, (PCRE2_SPTR)line.data,
-                             line.length, 0, 0, match_data, NULL)) < 0) {
+  int errcode = pcre2_match(unreported_todo_pattern, (PCRE2_SPTR)line.data,
+                            line.length, 0, 0, match_data, NULL);
+  if (errcode < 0) {
     if (errcode != PCRE2_ERROR_NOMATCH) {
       PCRE2_UCHAR errbuf[128];
       pcre2_get_error_message(errcode, errbuf, sizeof errbuf);
@@ -106,7 +111,7 @@ static todo_t* line_as_todo(struct string_span line) {
   char* prefix = calloc(ovector[3] - ovector[2] + 1, 1);
   memcpy(prefix, line.data + ovector[2], ovector[3] - ovector[2]);
   char* suffix = calloc(ovector[5] - ovector[4] + 1, 1);
-  memcpy(suffix, line.data + ovector[4], ovector[5] - ovector[4]);
+  memcpy(prefix, line.data + ovector[4], ovector[5] - ovector[4]);
   pcre2_match_data_free(match_data);
   pcre2_code_free(unreported_todo_pattern);
   todo_t* todo = calloc(1, sizeof(todo_t));
@@ -114,6 +119,57 @@ static todo_t* line_as_todo(struct string_span line) {
   todo->suffix = suffix;
   todo->filename = "";
   return todo;
+}
+
+static todo_t* line_as_reported_todo(struct string_span line) {
+  // TODO(#2): line_as_todo has false positives inside binary files and string
+  // literals.
+  pcre2_code* reported_todo_pattern =
+      regex_must_compile("^(.*)TODO\\((.*)\\): (.*)$");
+  if (reported_todo_pattern == NULL) {
+    return NULL;
+  }
+  pcre2_match_data* match_data =
+      pcre2_match_data_create_from_pattern(reported_todo_pattern, NULL);
+  int errcode = pcre2_match(reported_todo_pattern, (PCRE2_SPTR)line.data,
+                            line.length, 0, 0, match_data, NULL);
+  if (errcode < 0) {
+    if (errcode != PCRE2_ERROR_NOMATCH) {
+      PCRE2_UCHAR errbuf[128];
+      pcre2_get_error_message(errcode, errbuf, sizeof errbuf);
+      fprintf(stderr, "Matching TODO pattern: %s\n", errbuf);
+    }
+    return NULL;
+  }
+  PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match_data);
+  char* prefix = calloc(ovector[3] - ovector[2] + 1, 1);
+  memcpy(prefix, line.data + ovector[2], ovector[3] - ovector[2]);
+  char* id = calloc(ovector[5] - ovector[4] + 1, 1);
+  memcpy(id, line.data + ovector[4], ovector[5] - ovector[4]);
+  char* suffix = calloc(ovector[7] - ovector[6] + 1, 1);
+  memcpy(suffix, line.data + ovector[6], ovector[7] - ovector[6]);
+  pcre2_match_data_free(match_data);
+  pcre2_code_free(reported_todo_pattern);
+  todo_t* todo = calloc(1, sizeof(todo_t));
+  todo->prefix = prefix;
+  todo->suffix = suffix;
+  todo->filename = "";
+  todo->id = id;
+  return todo;
+}
+
+todo_t* line_as_todo(struct string_span line) {
+  todo_t* todo = line_as_unreported_todo(line);
+  if (todo != NULL) {
+    return todo;
+  }
+
+  todo = line_as_reported_todo(line);
+  if (todo != NULL) {
+    return todo;
+  }
+
+  return NULL;
 }
 
 static maybe_todos_t todos_of_file(const char* file_path) {
