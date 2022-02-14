@@ -287,7 +287,7 @@ typedef struct {
 } report_subcommand_state_t;
 
 static bool visit_report_todo(todo_t* todo, void* state) {
-  if (todo->id != NULL) {
+  if (todo->id == NULL) {
     report_subcommand_state_t* s = state;
     maybe_todo_t reported_todo = report_todo(*todo, s->creds, s->repo);
     if (!reported_todo.success) {
