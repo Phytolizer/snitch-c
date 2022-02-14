@@ -263,6 +263,7 @@ static bool list_subcommand(void) {
 typedef MAYBE_T(todo_t) maybe_todo_t;
 
 static maybe_todo_t report_todo(todo_t todo, github_credentials_t creds) {
+  // TODO(#8): report_todo is not implemented.
   (void)creds;
   return (maybe_todo_t){.success = true, .value = todo};
 }
