@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "minIni/minIni.h"
 #include "pcre8.h"
 #include "string_span.h"
 #include "walk.h"
@@ -53,15 +54,24 @@ typedef struct {
 } todos_t;
 
 typedef struct {
-  int nothing;
+  char* personal_token;
 } github_credentials_t;
 
 typedef MAYBE_T(github_credentials_t) maybe_github_credentials_t;
 
 maybe_github_credentials_t github_credentials_from_file(const char* filepath) {
-  // TODO(#6): github_credentials_from_file is not implemented
-  (void)filepath;
-  return (maybe_github_credentials_t){.success = true, .value = {0}};
+  const int token_size = 128;
+  char* personal_token = calloc(token_size, 1);
+  ini_gets("github", "personal_token", "INVALID", personal_token,
+           sizeof personal_token, filepath);
+  if (strcmp(personal_token, "INVALID") == 0) {
+    free(personal_token);
+    return (maybe_github_credentials_t){.success = false};
+  }
+  return (maybe_github_credentials_t){
+      .success = true,
+      .value = {.personal_token = personal_token},
+  };
 }
 
 static void todos_push(todos_t* todos, todo_t todo) {
@@ -309,34 +319,28 @@ static bool report_subcommand(github_credentials_t creds) {
   return true;
 }
 
-static char* string_to_heap(const char* cstr) {
-  size_t len = strlen(cstr);
-  char* result = calloc(len + 1, 1);
-  memcpy(result, cstr, len);
-  return result;
-}
-
 static char* find_credentials_path(char* const* envp) {
   char* xdg_config_dir = NULL;
+  char* home_dir = NULL;
   for (size_t i = 0; envp[i] != NULL; i += 1) {
     char* eq = strchr(envp[i], '=');
     assert(eq != NULL);
-    if (strncmp(envp[i], "XDG_CONFIG_DIR", eq - envp[i]) == 0) {
+    *eq = '\0';
+    if (strcmp(envp[i], "XDG_CONFIG_DIR") == 0) {
       xdg_config_dir = eq + 1;
-      break;
     }
+    if (strcmp(envp[i], "HOME") == 0) {
+      home_dir = eq + 1;
+    }
+    *eq = '=';
   }
   if (xdg_config_dir == NULL) {
-    return string_to_heap("~/.config/snitch/github.ini");
+    if (home_dir == NULL) {
+      return NULL;
+    }
+    return allocated_sprintf("%s/.config/snitch/github.ini", home_dir);
   }
-  int len = snprintf(NULL, 0, "%s/snitch/github.ini", xdg_config_dir);
-  if (len <= 0) {
-    return NULL;
-  }
-
-  char* result = calloc(len + 1, 1);
-  snprintf(result, len + 1, "%s/snitch/github.ini", xdg_config_dir);
-  return result;
+  return allocated_sprintf("%s/snitch/github.ini", xdg_config_dir);
 }
 
 int main(int argc, char** argv, char** envp) {

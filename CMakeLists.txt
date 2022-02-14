@@ -17,6 +17,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pcre)
 
+add_library(minIni minIni/minIni.c)
+
 add_executable(snitch main.c walk.c string_span.c)
 target_compile_features(snitch PRIVATE c_std_11)
-target_link_libraries(snitch PRIVATE pcre2-8)
+target_link_libraries(snitch PRIVATE pcre2-8 minIni)
