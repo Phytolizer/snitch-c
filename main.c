@@ -63,11 +63,11 @@ static void todos_push(todos_t* todos, todo_t todo) {
 
 static char* todo_to_string(todo_t t) {
   if (t.id == NULL) {
-    return allocated_sprintf("%s:%zu: %sTODO: %s\n", t.filename, t.line,
-                             t.prefix, t.suffix);
+    return allocated_sprintf("%s:%zu: %sTODO: %s", t.filename, t.line, t.prefix,
+                             t.suffix);
   }
 
-  return allocated_sprintf("%s:%zu: %sTODO(%s): %s\n", t.filename, t.line,
+  return allocated_sprintf("%s:%zu: %sTODO(%s): %s", t.filename, t.line,
                            t.prefix, t.id, t.suffix);
 }
 
@@ -198,13 +198,8 @@ static bool walk_todos_of_file(const char* file_path, todo_visitor_t visit,
   return true;
 }
 
-static bool todos_of_dir_visitor(todo_t* todo, void* state) {
-  todos_t* todos = state;
-  todos_push(todos, *todo);
-  return true;
-}
-
-static maybe_todos_t todos_of_dir(const char* dir_path) {
+static bool todos_of_dir(const char* dir_path, todo_visitor_t visit,
+                         void* visit_state) {
   struct walkdir walk = walkdir_open(dir_path);
   todos_t all_todos = {0};
   while (true) {
@@ -214,8 +209,8 @@ static maybe_todos_t todos_of_dir(const char* dir_path) {
     }
     char* file_path = join_path(walkdir_dir_name(&walk), entry->d_name);
     todos_t file_todos = {0};
-    if (!walk_todos_of_file(file_path, todos_of_dir_visitor, &file_todos)) {
-      return (maybe_todos_t){.success = false};
+    if (!walk_todos_of_file(file_path, visit, visit_state)) {
+      return false;
     }
     for (size_t i = 0; i < file_todos.length; i += 1) {
       todos_push(&all_todos, file_todos.data[i]);
@@ -230,19 +225,20 @@ static maybe_todos_t todos_of_dir(const char* dir_path) {
     exit(1);
   }
   walkdir_close(&walk);
-  return (maybe_todos_t){.success = true, .todos = all_todos};
+  return true;
 }
 
-static void list_subcommand(void) {
+static bool visit_todo(todo_t* todo, void* state) {
+  (void)state;
+  char* todo_str = todo_to_string(*todo);
+  printf("%s\n", todo_str);
+  free(todo_str);
+  return true;
+}
+
+static bool list_subcommand(void) {
   // TODO(#3): list_subcommand doesn't handle a possible error case here.
-  maybe_todos_t dir_todos = todos_of_dir(".");
-  todos_t todos = dir_todos.todos;
-  for (size_t i = 0; i < todos.length; i += 1) {
-    char* todo = todo_to_string(todos.data[i]);
-    printf("%s", todo);
-    free(todo);
-  }
-  free(todos.data);
+  return todos_of_dir(".", visit_todo, NULL);
 }
 
 static void report_subcommand(void) {
@@ -254,7 +250,9 @@ static void report_subcommand(void) {
 int main(int argc, char** argv) {
   if (argc > 1) {
     if (strcmp(argv[1], "list") == 0) {
-      list_subcommand();
+      if (!list_subcommand()) {
+        return 1;
+      }
     } else if (strcmp(argv[1], "report") == 0) {
       report_subcommand();
     } else {
