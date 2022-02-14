@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <curl/curl.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -134,13 +135,15 @@ static todo_t* line_as_unreported_todo(struct string_span line) {
       pcre2_get_error_message(errcode, errbuf, sizeof errbuf);
       fprintf(stderr, "Matching TODO pattern: %s\n", errbuf);
     }
+    pcre2_match_data_free(match_data);
+    pcre2_code_free(unreported_todo_pattern);
     return NULL;
   }
   PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match_data);
   char* prefix = calloc(ovector[3] - ovector[2] + 1, 1);
   memcpy(prefix, line.data + ovector[2], ovector[3] - ovector[2]);
   char* suffix = calloc(ovector[5] - ovector[4] + 1, 1);
-  memcpy(prefix, line.data + ovector[4], ovector[5] - ovector[4]);
+  memcpy(suffix, line.data + ovector[4], ovector[5] - ovector[4]);
   pcre2_match_data_free(match_data);
   pcre2_code_free(unreported_todo_pattern);
   todo_t* todo = calloc(1, sizeof(todo_t));
@@ -168,6 +171,8 @@ static todo_t* line_as_reported_todo(struct string_span line) {
       pcre2_get_error_message(errcode, errbuf, sizeof errbuf);
       fprintf(stderr, "Matching TODO pattern: %s\n", errbuf);
     }
+    pcre2_match_data_free(match_data);
+    pcre2_code_free(reported_todo_pattern);
     return NULL;
   }
   PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match_data);
@@ -217,11 +222,17 @@ static bool walk_todos_of_file(const char* file_path, todo_visitor_t visit,
     todo_t* todo = line_as_todo((struct string_span){line, line_length});
     if (todo != NULL) {
       if (!visit(todo, visit_state)) {
+        free(todo->prefix);
+        free(todo->id);
+        free(todo->suffix);
         free(todo);
         return false;
       }
+      free(todo->prefix);
+      free(todo->id);
+      free(todo->suffix);
+      free(todo);
     }
-    free(todo);
   }
   free(line);
   fclose(fp);
@@ -248,6 +259,7 @@ static bool walk_todos_of_dir(const char* dir_path, todo_visitor_t visit,
     free(file_todos.data);
     free(file_path);
   }
+  free(all_todos.data);
   if (errno != 0) {
     char errbuf[64];
     strerror_r(errno, errbuf, sizeof errbuf);
@@ -274,9 +286,36 @@ typedef MAYBE_T(todo_t) maybe_todo_t;
 
 static maybe_todo_t report_todo(todo_t todo, github_credentials_t creds,
                                 const char* repo) {
-  // TODO(#8): report_todo is not implemented.
-  (void)creds;
-  (void)repo;
+  curl_global_init(CURL_GLOBAL_ALL);
+  CURL* c = curl_easy_init();
+
+  // TODO: report_todo doesn't use a proper JSON library to encode JSON
+  char* json_body = allocated_sprintf("{\"title\": \"%s\"}", todo.suffix);
+  char* url = allocated_sprintf("https://api.github.com/repos/%s/issues", repo);
+  curl_easy_setopt(c, CURLOPT_URL, url);
+  struct curl_slist* headers = NULL;
+  headers = curl_slist_append(headers, "Content-Type: application/json");
+  headers = curl_slist_append(headers, "User-Agent: snitch");
+  char* username_and_token =
+      allocated_sprintf("Phytolizer:%s", creds.personal_token);
+  curl_easy_setopt(c, CURLOPT_USERPWD, username_and_token);
+  curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(c, CURLOPT_VERBOSE, 1L);
+  curl_easy_setopt(c, CURLOPT_POSTFIELDS, json_body);
+  curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, strlen(json_body));
+  CURLcode res = curl_easy_perform(c);
+  curl_slist_free_all(headers);
+  free(username_and_token);
+  free(url);
+  free(json_body);
+  if (res != CURLE_OK) {
+    fprintf(stderr, "curl_easy_perform failed: %s\n", curl_easy_strerror(res));
+    curl_easy_cleanup(c);
+    curl_global_cleanup();
+    return (maybe_todo_t){.success = false};
+  }
+  curl_easy_cleanup(c);
+  curl_global_cleanup();
   return (maybe_todo_t){.success = true, .value = todo};
 }
 
@@ -401,6 +440,7 @@ int main(int argc, char** argv, char** envp) {
       }
       // TODO(#9): github repo is not automatically derived from the git repo
       report_subcommand(creds.value, argv[2]);
+      free(creds.value.personal_token);
     } else {
       fprintf(stderr, "`%s` unknown command\n", argv[1]);
       return 1;

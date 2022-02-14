@@ -17,8 +17,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pcre)
 
+FetchContent_Declare(
+  libcurl
+  GIT_REPOSITORY "https://github.com/curl/curl"
+  GIT_TAG curl-7_81_0
+)
+FetchContent_MakeAvailable(libcurl)
+
 add_library(minIni minIni/minIni.c)
 
 add_executable(snitch main.c walk.c string_span.c)
 target_compile_features(snitch PRIVATE c_std_11)
-target_link_libraries(snitch PRIVATE pcre2-8 minIni)
+target_link_libraries(snitch PRIVATE pcre2-8 minIni libcurl)

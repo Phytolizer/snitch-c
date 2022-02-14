@@ -1,5 +1,6 @@
 #include "walk.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,8 @@ static void walkdir_push(struct walkdir* walk, DIR* dir, const char* path) {
     free(walk->dir_names);
     walk->dir_names = new_dir_names;
   }
+
+  assert(dir != NULL);
 
   walk->stack[walk->stack_top] = dir;
   size_t path_len = strlen(path);
@@ -90,7 +93,8 @@ struct dirent* walkdir_next(struct walkdir* walk) {
     if (entry != NULL) {
       if (entry->d_type == DT_DIR) {
         if (strcmp(entry->d_name, ".") != 0 &&
-            strcmp(entry->d_name, "..") != 0) {
+            strcmp(entry->d_name, "..") != 0 &&
+            strcmp(entry->d_name, "build") != 0) {
           char* child_path = join_path(walkdir_dir_name(walk), entry->d_name);
           walkdir_push(walk, opendir(child_path), child_path);
           free(child_path);
@@ -102,6 +106,7 @@ struct dirent* walkdir_next(struct walkdir* walk) {
       return NULL;
     } else {
       free(walkdir_dir_name(walk));
+      closedir(walkdir_top(walk));
       walkdir_pop(walk);
     }
   }
