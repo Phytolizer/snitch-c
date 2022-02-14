@@ -271,21 +271,24 @@ static bool list_subcommand(void) {
 
 typedef MAYBE_T(todo_t) maybe_todo_t;
 
-static maybe_todo_t report_todo(todo_t todo, github_credentials_t creds) {
+static maybe_todo_t report_todo(todo_t todo, github_credentials_t creds,
+                                const char* repo) {
   // TODO(#8): report_todo is not implemented.
   (void)creds;
+  (void)repo;
   return (maybe_todo_t){.success = true, .value = todo};
 }
 
 typedef struct {
   todos_t* reported_todos;
   github_credentials_t creds;
+  const char* repo;
 } report_subcommand_state_t;
 
 static bool visit_report_todo(todo_t* todo, void* state) {
   if (todo->id != NULL) {
     report_subcommand_state_t* s = state;
-    maybe_todo_t reported_todo = report_todo(*todo, s->creds);
+    maybe_todo_t reported_todo = report_todo(*todo, s->creds, s->repo);
     if (!reported_todo.success) {
       return false;
     }
@@ -299,11 +302,12 @@ static bool visit_report_todo(todo_t* todo, void* state) {
   return true;
 }
 
-static bool report_subcommand(github_credentials_t creds) {
+static bool report_subcommand(github_credentials_t creds, const char* repo) {
   todos_t reported_todos = {0};
   report_subcommand_state_t state = {
       .reported_todos = &reported_todos,
       .creds = creds,
+      .repo = repo,
   };
 
   if (!walk_todos_of_dir(".", visit_report_todo, &state)) {
@@ -343,6 +347,13 @@ static char* find_credentials_path(char* const* envp) {
   return allocated_sprintf("%s/snitch/github.ini", xdg_config_dir);
 }
 
+static void usage(FILE* stream) {
+  fprintf(stream,
+          "snitch [opt]\n"
+          "\tlist: list all todos of a dir recursively\n"
+          "\treport <owner/repo>: report issues to github\n");
+}
+
 int main(int argc, char** argv, char** envp) {
   char* credentials_path = find_credentials_path(envp);
   maybe_github_credentials_t creds =
@@ -359,17 +370,19 @@ int main(int argc, char** argv, char** envp) {
         return 1;
       }
     } else if (strcmp(argv[1], "report") == 0) {
-      report_subcommand(creds.value);
+      if (argc < 3) {
+        usage(stderr);
+        fprintf(stderr, "Not enough arguments\n");
+        return 1;
+      }
+      report_subcommand(creds.value, argv[2]);
     } else {
       fprintf(stderr, "`%s` unknown command\n", argv[1]);
       return 1;
     }
   } else {
     // TODO(#5): implement a structure for these option descriptions
-    fprintf(
-        stderr,
-        "snitch [opt]\n\tlist: list all todos of a dir recursively\n\treport: "
-        "report an issue to github\n");
+    usage(stderr);
     return 1;
   }
 }
