@@ -172,25 +172,36 @@ todo_t* line_as_todo(struct string_span line) {
   return NULL;
 }
 
-static maybe_todos_t todos_of_file(const char* file_path) {
+typedef bool todo_visitor_t(todo_t* todo, void* state);
+
+static bool walk_todos_of_file(const char* file_path, todo_visitor_t visit,
+                               void* visit_state) {
   FILE* fp = fopen(file_path, "r");
   if (fp == NULL) {
-    return (maybe_todos_t){.success = false};
+    return false;
   }
 
-  todos_t todos = {0};
   char* line = NULL;
   size_t line_alloc_length = 0;
   ssize_t line_length;
   while ((line_length = getline(&line, &line_alloc_length, fp)) != -1) {
     todo_t* todo = line_as_todo((struct string_span){line, line_length});
     if (todo != NULL) {
-      todos_push(&todos, *todo);
+      if (!visit(todo, visit_state)) {
+        free(todo);
+        return false;
+      }
     }
     free(todo);
   }
   free(line);
-  return (maybe_todos_t){.success = true, .todos = todos};
+  return true;
+}
+
+static bool todos_of_dir_visitor(todo_t* todo, void* state) {
+  todos_t* todos = state;
+  todos_push(todos, *todo);
+  return true;
 }
 
 static maybe_todos_t todos_of_dir(const char* dir_path) {
@@ -202,15 +213,14 @@ static maybe_todos_t todos_of_dir(const char* dir_path) {
       break;
     }
     char* file_path = join_path(walkdir_dir_name(&walk), entry->d_name);
-    maybe_todos_t file_todos = todos_of_file(file_path);
-    if (!file_todos.success) {
-      return file_todos;
+    todos_t file_todos = {0};
+    if (!walk_todos_of_file(file_path, todos_of_dir_visitor, &file_todos)) {
+      return (maybe_todos_t){.success = false};
     }
-    todos_t todos = file_todos.todos;
-    for (size_t i = 0; i < todos.length; i += 1) {
-      todos_push(&all_todos, todos.data[i]);
+    for (size_t i = 0; i < file_todos.length; i += 1) {
+      todos_push(&all_todos, file_todos.data[i]);
     }
-    free(todos.data);
+    free(file_todos.data);
     free(file_path);
   }
   if (errno != 0) {
