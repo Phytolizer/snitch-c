@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "pcre8.h"
 #include "string_span.h"
 #include "walk.h"
 
@@ -76,8 +77,41 @@ typedef struct {
 } maybe_todos_t;
 
 static todo_t* line_as_todo(struct string_span line) {
-  (void)line;
-  return NULL;
+  int errcode;
+  PCRE2_SIZE errofs;
+  pcre2_code* unreported_todo_pattern =
+      pcre2_compile((PCRE2_SPTR) "(.*)TODO: (.*)", PCRE2_ZERO_TERMINATED, 0,
+                    &errcode, &errofs, NULL);
+  if (unreported_todo_pattern == NULL) {
+    PCRE2_UCHAR errbuf[128];
+    pcre2_get_error_message(errcode, errbuf, sizeof errbuf);
+    fprintf(stderr, "Compiling TODO pattern: %s\n", errbuf);
+    return NULL;
+  }
+  pcre2_match_data* match_data =
+      pcre2_match_data_create_from_pattern(unreported_todo_pattern, NULL);
+  if ((errcode = pcre2_match(unreported_todo_pattern, (PCRE2_SPTR)line.data,
+                             line.length, 0, PCRE2_ANCHORED | PCRE2_ENDANCHORED,
+                             match_data, NULL)) < 0) {
+    if (errcode != PCRE2_ERROR_NOMATCH) {
+      PCRE2_UCHAR errbuf[128];
+      pcre2_get_error_message(errcode, errbuf, sizeof errbuf);
+      fprintf(stderr, "Matching TODO pattern: %s\n", errbuf);
+    }
+    return NULL;
+  }
+  PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match_data);
+  char* prefix = calloc(ovector[3] - ovector[2] + 1, 1);
+  memcpy(prefix, line.data + ovector[2], ovector[3] - ovector[2]);
+  char* suffix = calloc(ovector[5] - ovector[4] + 1, 1);
+  memcpy(suffix, line.data + ovector[4], ovector[5] - ovector[4]);
+  pcre2_match_data_free(match_data);
+  pcre2_code_free(unreported_todo_pattern);
+  todo_t* todo = calloc(1, sizeof(todo_t));
+  todo->prefix = prefix;
+  todo->suffix = suffix;
+  todo->filename = "";
+  return todo;
 }
 
 static maybe_todos_t todos_of_file(const char* file_path) {
