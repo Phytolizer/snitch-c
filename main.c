@@ -256,7 +256,6 @@ static bool visit_todo(todo_t* todo, void* state) {
 }
 
 static bool list_subcommand(void) {
-  // TODO(#3): list_subcommand doesn't handle a possible error case here.
   return walk_todos_of_dir(".", visit_todo, NULL);
 }
 
