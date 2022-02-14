@@ -284,11 +284,30 @@ typedef struct {
   todos_t* reported_todos;
   github_credentials_t creds;
   const char* repo;
+  char* line_buffer;
+  size_t line_buffer_length;
 } report_subcommand_state_t;
 
 static bool visit_report_todo(todo_t* todo, void* state) {
   if (todo->id == NULL) {
     report_subcommand_state_t* s = state;
+    char* todo_str = todo_to_string(*todo);
+    printf("%s\n", todo_str);
+    free(todo_str);
+    while (true) {
+      printf("Do you want to report this? [y/n] ");
+      fflush(stdout);
+      if (getline(&s->line_buffer, &s->line_buffer_length, stdin) == -1) {
+        return false;
+      }
+      if (strcmp(s->line_buffer, "y\n") == 0 ||
+          strcmp(s->line_buffer, "n\n") == 0) {
+        break;
+      }
+    }
+    if (strcmp(s->line_buffer, "n\n") == 0) {
+      return true;
+    }
     maybe_todo_t reported_todo = report_todo(*todo, s->creds, s->repo);
     if (!reported_todo.success) {
       return false;
@@ -309,11 +328,15 @@ static bool report_subcommand(github_credentials_t creds, const char* repo) {
       .reported_todos = &reported_todos,
       .creds = creds,
       .repo = repo,
+      .line_buffer = NULL,
+      .line_buffer_length = 0,
   };
 
   if (!walk_todos_of_dir(".", visit_report_todo, &state)) {
+    free(state.line_buffer);
     return false;
   }
+  free(state.line_buffer);
 
   for (size_t i = 0; i < reported_todos.length; i += 1) {
     if (!todo_update(reported_todos.data[i])) {
