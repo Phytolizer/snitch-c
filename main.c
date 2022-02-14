@@ -59,6 +59,7 @@ typedef struct {
 typedef MAYBE_T(github_credentials_t) maybe_github_credentials_t;
 
 maybe_github_credentials_t github_credentials_from_file(const char* filepath) {
+  // TODO(#6): github_credentials_from_file is not implemented
   (void)filepath;
   return (maybe_github_credentials_t){.success = true, .value = {0}};
 }
