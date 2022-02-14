@@ -307,9 +307,41 @@ static bool report_subcommand(github_credentials_t creds) {
   return true;
 }
 
-int main(int argc, char** argv) {
+static char* string_to_heap(const char* cstr) {
+  size_t len = strlen(cstr);
+  char* result = calloc(len + 1, 1);
+  memcpy(result, cstr, len);
+  return result;
+}
+
+static char* find_credentials_path(char* const* envp) {
+  char* xdg_config_dir = NULL;
+  for (size_t i = 0; envp[i] != NULL; i += 1) {
+    char* eq = strchr(envp[i], '=');
+    assert(eq != NULL);
+    if (strncmp(envp[i], "XDG_CONFIG_DIR", eq - envp[i]) == 0) {
+      xdg_config_dir = eq + 1;
+      break;
+    }
+  }
+  if (xdg_config_dir == NULL) {
+    return string_to_heap("~/.config/snitch/github.ini");
+  }
+  int len = snprintf(NULL, 0, "%s/snitch/github.ini", xdg_config_dir);
+  if (len <= 0) {
+    return NULL;
+  }
+
+  char* result = calloc(len + 1, 1);
+  snprintf(result, len + 1, "%s/snitch/github.ini", xdg_config_dir);
+  return result;
+}
+
+int main(int argc, char** argv, char** envp) {
+  char* credentials_path = find_credentials_path(envp);
   maybe_github_credentials_t creds =
-      github_credentials_from_file("~/.config/snitch/github.ini");
+      github_credentials_from_file(credentials_path);
+  free(credentials_path);
   if (!creds.success) {
     fprintf(stderr, "could not get github credentials\n");
     return 1;
