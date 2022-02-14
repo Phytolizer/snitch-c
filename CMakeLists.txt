@@ -9,4 +9,5 @@ project(
   HOMEPAGE_URL "https://github.com/Phytolizer/snitch"
 )
 
-add_executable(snitch main.c)
+add_executable(snitch main.c walk.c string_span.c)
+target_compile_features(snitch PRIVATE c_std_11)
