@@ -12,6 +12,12 @@
 #include "string_span.h"
 #include "walk.h"
 
+#define MAYBE_T(T) \
+  struct {         \
+    bool success;  \
+    T value;       \
+  }
+
 static char* allocated_sprintf(const char* format, ...) {
   va_list args;
   va_start(args, format);
@@ -46,6 +52,17 @@ typedef struct {
   size_t capacity;
 } todos_t;
 
+typedef struct {
+  int nothing;
+} github_credentials_t;
+
+typedef MAYBE_T(github_credentials_t) maybe_github_credentials_t;
+
+maybe_github_credentials_t github_credentials_from_file(const char* filepath) {
+  (void)filepath;
+  return (maybe_github_credentials_t){.success = true, .value = {0}};
+}
+
 static void todos_push(todos_t* todos, todo_t todo) {
   if (todos->length == todos->capacity) {
     todos->capacity = todos->capacity * 2 + 1;
@@ -71,10 +88,10 @@ static char* todo_to_string(todo_t t) {
                            t.prefix, t.id, t.suffix);
 }
 
-typedef struct {
-  bool success;
-  todos_t todos;
-} maybe_todos_t;
+static bool todo_update(todo_t todo) {
+  (void)todo;
+  return true;
+}
 
 static pcre2_code* regex_must_compile(const char* regex) {
   int errcode;
@@ -198,8 +215,8 @@ static bool walk_todos_of_file(const char* file_path, todo_visitor_t visit,
   return true;
 }
 
-static bool todos_of_dir(const char* dir_path, todo_visitor_t visit,
-                         void* visit_state) {
+static bool walk_todos_of_dir(const char* dir_path, todo_visitor_t visit,
+                              void* visit_state) {
   struct walkdir walk = walkdir_open(dir_path);
   todos_t all_todos = {0};
   while (true) {
@@ -238,23 +255,73 @@ static bool visit_todo(todo_t* todo, void* state) {
 
 static bool list_subcommand(void) {
   // TODO(#3): list_subcommand doesn't handle a possible error case here.
-  return todos_of_dir(".", visit_todo, NULL);
+  return walk_todos_of_dir(".", visit_todo, NULL);
 }
 
-static void report_subcommand(void) {
-  // TODO(#4): report_subcommand is not implemented.
-  fprintf(stderr, "report is not implemented");
-  exit(1);
+typedef MAYBE_T(todo_t) maybe_todo_t;
+
+static maybe_todo_t report_todo(todo_t todo, github_credentials_t creds) {
+  (void)creds;
+  return (maybe_todo_t){.success = true, .value = todo};
+}
+
+typedef struct {
+  todos_t* reported_todos;
+  github_credentials_t creds;
+} report_subcommand_state_t;
+
+static bool visit_report_todo(todo_t* todo, void* state) {
+  if (todo->id != NULL) {
+    report_subcommand_state_t* s = state;
+    maybe_todo_t reported_todo = report_todo(*todo, s->creds);
+    if (!reported_todo.success) {
+      return false;
+    }
+
+    char* todo_text = todo_to_string(reported_todo.value);
+    printf("[REPORTED] %s\n", todo_text);
+    free(todo_text);
+
+    todos_push(s->reported_todos, reported_todo.value);
+  }
+  return true;
+}
+
+static bool report_subcommand(github_credentials_t creds) {
+  todos_t reported_todos = {0};
+  report_subcommand_state_t state = {
+      .reported_todos = &reported_todos,
+      .creds = creds,
+  };
+
+  if (!walk_todos_of_dir(".", visit_report_todo, &state)) {
+    return false;
+  }
+
+  for (size_t i = 0; i < reported_todos.length; i += 1) {
+    if (!todo_update(reported_todos.data[i])) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 int main(int argc, char** argv) {
+  maybe_github_credentials_t creds =
+      github_credentials_from_file("~/.config/snitch/github.ini");
+  if (!creds.success) {
+    fprintf(stderr, "could not get github credentials\n");
+    return 1;
+  }
+
   if (argc > 1) {
     if (strcmp(argv[1], "list") == 0) {
       if (!list_subcommand()) {
         return 1;
       }
     } else if (strcmp(argv[1], "report") == 0) {
-      report_subcommand();
+      report_subcommand(creds.value);
     } else {
       fprintf(stderr, "`%s` unknown command\n", argv[1]);
       return 1;
