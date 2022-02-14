@@ -197,9 +197,10 @@ int main(int argc, char** argv) {
     }
   } else {
     // TODO(#5): implement a structure for these option descriptions
-    fprintf(stderr,
-            "snitch [opt]\n\tlist: list all possible subcommands\n\treport: "
-            "report an issue to github\n");
+    fprintf(
+        stderr,
+        "snitch [opt]\n\tlist: list all todos of a dir recursively\n\treport: "
+        "report an issue to github\n");
     return 1;
   }
 }
