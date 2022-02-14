@@ -90,6 +90,7 @@ static char* todo_to_string(todo_t t) {
 }
 
 static bool todo_update(todo_t todo) {
+  // TODO(#7): todo_update is not implemented.
   (void)todo;
   return true;
 }
