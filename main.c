@@ -77,6 +77,9 @@ typedef struct {
 } maybe_todos_t;
 
 static todo_t* line_as_todo(struct string_span line) {
+  // TODO(#1): line_as_todo does not support reported TODOs.
+  // TODO(#2): line_as_todo has false positives inside binary files and string
+  // literals.
   int errcode;
   PCRE2_SIZE errofs;
   pcre2_code* unreported_todo_pattern =
@@ -165,6 +168,7 @@ static maybe_todos_t todos_of_dir(const char* dir_path) {
 }
 
 static void list_subcommand(void) {
+  // TODO(#3): list_subcommand doesn't handle a possible error case here.
   maybe_todos_t dir_todos = todos_of_dir(".");
   todos_t todos = dir_todos.todos;
   for (size_t i = 0; i < todos.length; i += 1) {
@@ -176,6 +180,7 @@ static void list_subcommand(void) {
 }
 
 static void report_subcommand(void) {
+  // TODO(#4): report_subcommand is not implemented.
   fprintf(stderr, "report is not implemented");
   exit(1);
 }
@@ -191,6 +196,7 @@ int main(int argc, char** argv) {
       return 1;
     }
   } else {
+    // TODO(#5): implement a structure for these option descriptions
     fprintf(stderr,
             "snitch [opt]\n\tlist: list all possible subcommands\n\treport: "
             "report an issue to github\n");
