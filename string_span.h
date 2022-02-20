@@ -10,6 +10,7 @@ struct string_span {
 };
 
 struct string_span string_span_from_cstr(char* cstr);
+struct string_span string_span_dup(char* str, size_t len);
 struct string_span string_span_trim_left(struct string_span ss);
 struct string_span string_span_trim_right(struct string_span ss);
 struct string_span string_span_trim(struct string_span ss);

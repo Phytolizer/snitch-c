@@ -100,9 +100,63 @@ static char* todo_to_string(todo_t t) {
                            t.prefix, t.id, t.suffix);
 }
 
+typedef MAYBE_T(struct string_span) maybe_string_t;
+
+static maybe_string_t todo_update_to_temp(todo_t t) {
+  FILE* input_file = fopen(t.filename, "r");
+  if (input_file == NULL) {
+    char errbuf[64];
+    strerror_r(errno, errbuf, sizeof errbuf);
+    fprintf(stderr, "Could not open %s: %s\n", t.filename, errbuf);
+    return (maybe_string_t){.success = false};
+  }
+  char tmpbuf[] = "snitch_XXXXXX";
+  int tmpfd = mkstemp(tmpbuf);
+  if (tmpfd == -1) {
+    char errbuf[64];
+    strerror_r(errno, errbuf, sizeof errbuf);
+    fprintf(stderr, "Could not create temp file %s: %s\n", tmpbuf, errbuf);
+    return (maybe_string_t){.success = false};
+  }
+  char iobuf[512];
+  size_t line = 1;
+  while (fgets(iobuf, sizeof iobuf, input_file) != NULL) {
+    size_t len = strlen(iobuf);
+    if (line == t.line) {
+      char* todo = todo_to_string(t);
+      write(tmpfd, todo, strlen(todo));
+      free(todo);
+    } else {
+      write(tmpfd, iobuf, len);
+    }
+    line += 1;
+  }
+
+  return (maybe_string_t){
+      .success = true,
+      .value = string_span_dup(tmpbuf, sizeof tmpbuf - 1),
+  };
+}
+
 static bool todo_update(todo_t todo) {
-  // TODO(#7): todo_update is not implemented.
-  (void)todo;
+  maybe_string_t output_file = todo_update_to_temp(todo);
+  if (!output_file.success) {
+    return false;
+  }
+
+  if (remove(todo.filename) != 0) {
+    perror("remove");
+    free(output_file.value.data);
+    return false;
+  }
+
+  if (rename(output_file.value.data, todo.filename) != 0) {
+    perror("rename");
+    free(output_file.value.data);
+    return false;
+  }
+
+  free(output_file.value.data);
   return true;
 }
 
