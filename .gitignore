@@ -1,0 +1,5 @@
+/coolbuild
+/coolbuild.old
+/build
+/.cache
+compile_commands.json
