@@ -14,3 +14,4 @@ typedef SPAN_TYPE(char) string_t;
 string_t string_from_c(char* c);
 string_t string_from_sprintf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 string_t string_from_vsprintf(const char* fmt, va_list args);
+char* string_to_c(string_t s);

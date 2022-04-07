@@ -29,3 +29,10 @@ string_t string_from_vsprintf(const char* fmt, va_list args) {
     vsnprintf(buf, len + 1, fmt, args);
     return (string_t)SPAN_WITH_LENGTH(buf, len);
 }
+
+char* string_to_c(string_t s) {
+    char* buf = malloc(s.length + 1);
+    memcpy(buf, s.begin, s.length);
+    buf[s.length] = '\0';
+    return buf;
+}

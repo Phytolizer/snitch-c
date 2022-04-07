@@ -1,5 +1,6 @@
 #pragma once
 
+#include "buffer.h"
 #include "span.h"
 #include "string_span.h"
 
@@ -20,3 +21,5 @@ void todo_print(todo_t* todo, FILE* stream);
 typedef SPAN_TYPE(todo_t) todo_span_t;
 
 todo_span_t todos_of_dir(string_t dir_path);
+
+typedef BUFFER_TYPE(todo_t) todo_buffer_t;
