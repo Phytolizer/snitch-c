@@ -6,13 +6,17 @@
 #define LDFLAGS "-lpcre2-8"
 #define LDFLAGS_FMT "v"
 
-#define CFLAGS "-std=gnu11", WFLAGS, GFLAG, IFLAGS
+#define CFLAGS "-std=c11", WFLAGS, GFLAG, IFLAGS
 
 const char* const sources[] = {
+        "source/list.c",
         "source/main.c",
+        "source/report.c",
+        "source/string_span.c",
+        "source/todo.c",
 };
 
-const char* cc(void) {
+static const char* cc(void) {
     return "gcc";
 }
 
@@ -27,4 +31,14 @@ int main(int argc, char** argv) {
     char** link_cmd =
             collect_args("vpvv" LDFLAGS_FMT, cc(), objects, "-o", "build/snitch", LDFLAGS);
     run_cmd(link_cmd);
+
+    if (argc > 1) {
+        if (strcmp(argv[1], "run") == 0) {
+            char** run_args = collect_args("vp", "build/snitch", &argv[2]);
+            run_cmd(run_args);
+        } else {
+            fprintf(stderr, "Unknown subcommand: %s\n", argv[1]);
+            return 1;
+        }
+    }
 }
