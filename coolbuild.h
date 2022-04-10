@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -11,8 +12,6 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-// Begin span.h
 
 #define SPAN_TYPE(T) \
     struct { \
@@ -27,12 +26,6 @@
 #define SPAN_WITH_LENGTH(begin, length) \
     { (begin), (begin) + (length), (length) }
 
-#define SPAN_FROM_ARRAY(array) SPAN_WITH_LENGTH(array, sizeof(array) / sizeof(array[0]))
-
-// End span.h
-
-// Begin buffer.h
-
 #define BUFFER_TYPE(T) \
     struct { \
         T* data; \
@@ -45,9 +38,9 @@
 
 #define BUFFER_FREE(buffer) free(buffer.data)
 
-#define BUFFER_EXPAND(buffer) \
+#define BUFFER_EXPAND(buffer, newlen) \
     do { \
-        if ((buffer)->length == (buffer)->capacity) { \
+        while (newlen > (buffer)->capacity) { \
             (buffer)->capacity = (buffer)->capacity * 2 + 1; \
             (buffer)->data = \
                     realloc((buffer)->data, (buffer)->capacity * sizeof((buffer)->data[0])); \
@@ -56,17 +49,24 @@
 
 #define BUFFER_PUSH(buffer, value) \
     do { \
-        BUFFER_EXPAND(buffer); \
+        BUFFER_EXPAND(buffer, (buffer)->length + 1); \
         (buffer)->data[(buffer)->length] = (value); \
         (buffer)->length++; \
     } while (false)
 
-#define BUFFER_AS_SPAN(buffer) SPAN_WITH_LENGTH((buffer).data, (buffer).length)
+#define BUFFER_APPEND(buffer, value, len) \
+    do { \
+        BUFFER_EXPAND(buffer, (buffer)->length + len); \
+        memcpy((buffer)->data + (buffer)->length, (value), (len) * sizeof((buffer)->data[0])); \
+        (buffer)->length += (len); \
+    } while (false)
 
-// End buffer.h
+#define BUFFER_AS_SPAN(buffer) SPAN_WITH_LENGTH((buffer).data, (buffer).length)
 
 #define PATH_SEPARATOR "/"
 #define PATH_SEPARATOR_LENGTH (sizeof PATH_SEPARATOR - 1)
+
+#define TEMP_BUFFER_SIZE 1024
 
 #define FOREACH_VARARGS(type, arg, begin, body) \
     do { \
@@ -130,7 +130,7 @@
         (*(objects))[i] = NULL; \
     } while (false)
 
-const char* vconcat_sep_impl(const char* sep, va_list args) {
+static inline const char* vconcat_sep_impl(const char* sep, va_list args) {
     size_t length = 0;
     int64_t seps = -1;
     size_t sep_len = strlen(sep);
@@ -162,11 +162,12 @@ const char* vconcat_sep_impl(const char* sep, va_list args) {
             }
         }
     }
+    result[length] = '\0';
 
     return result;
 }
 
-const char* concat_sep_impl(const char* sep, ...) {
+static inline const char* concat_sep_impl(const char* sep, ...) {
     va_list args;
     va_start(args, sep);
     const char* result = vconcat_sep_impl(sep, args);
@@ -179,7 +180,7 @@ const char* concat_sep_impl(const char* sep, ...) {
 
 #define PATH(...) CONCAT_SEP(PATH_SEPARATOR, __VA_ARGS__)
 
-void mkdirs_impl(int ignore, ...) {
+static inline void mkdirs_impl(int ignore, ...) {
     size_t length = 0;
     int64_t seps = -1;
 
@@ -217,7 +218,7 @@ void mkdirs_impl(int ignore, ...) {
 
 #define MKDIRS(...) mkdirs_impl(0, __VA_ARGS__, NULL)
 
-const char* concat_impl(int ignore, ...) {
+static inline const char* concat_impl(int ignore, ...) {
     size_t length = 0;
 
     FOREACH_VARARGS(const char*, arg, ignore, { length += strlen(arg); });
@@ -237,13 +238,24 @@ const char* concat_impl(int ignore, ...) {
 
 #define CONCAT(...) concat_impl(0, __VA_ARGS__, NULL)
 
-void coolbuild_exec(char** argv) {
+static inline const char* coolbuild_exec(char** argv, bool capture) {
+    int pipefds[2];
+    if (capture) {
+        if (pipe(pipefds) < 0) {
+            fprintf(stderr, "Could not create pipe: %s\n", strerror(errno));
+            exit(1);
+        }
+    }
     pid_t pid = fork();
     if (pid == -1) {
         fprintf(stderr, "[CB][ERROR] Could not fork: %s\n", strerror(errno));
         exit(1);
     }
     if (pid == 0) {
+        if (capture) {
+            close(pipefds[0]);
+            dup2(pipefds[1], STDOUT_FILENO);
+        }
         execvp(argv[0], argv);
         fprintf(stderr, "[CB][ERROR] Could not execute %s: %s\n", argv[0], strerror(errno));
         exit(1);
@@ -253,27 +265,42 @@ void coolbuild_exec(char** argv) {
     waitpid(pid, &status, 0);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         fprintf(stderr, "[CB][ERROR] Subcommand reported non-zero status %d\n", status);
-        exit(1);
+        exit(WEXITSTATUS(status));
     }
+
+    if (capture) {
+        close(pipefds[1]);
+        BUFFER_TYPE(char) result = BUFFER_INIT;
+        while (true) {
+            char buffer[TEMP_BUFFER_SIZE];
+            ssize_t n = read(pipefds[0], buffer, TEMP_BUFFER_SIZE);
+            if (n < 0) {
+                fprintf(stderr, "[CB][ERROR] Could not read from pipe: %s\n", strerror(errno));
+                exit(1);
+            }
+            if (n == 0) {
+                break;
+            }
+            BUFFER_APPEND(&result, buffer, n);
+        }
+        BUFFER_PUSH(&result, '\0');
+        return result.data;
+    }
+    return NULL;
 }
 
-void echo_cmd(char** argv) {
-    printf("[CB][CMD]");
+static inline void echo_cmd(char** argv) {
+    printf("[CB][INFO]");
     for (size_t i = 0; argv[i] != NULL; i++) {
         printf(" %s", argv[i]);
     }
     printf("\n");
 }
 
-void run_cmd(char** argv) {
-    echo_cmd(argv);
-    coolbuild_exec(argv);
-}
-
-void cmd_impl(int ignore, ...) {
+static inline const char* cmd_impl(int capture, ...) {
     size_t argc = 0;
 
-    FOREACH_VARARGS(const char*, arg, ignore, {
+    FOREACH_VARARGS(const char*, arg, capture, {
         if (arg[0] != '\0') {
             argc += 1;
         }
@@ -283,7 +310,7 @@ void cmd_impl(int ignore, ...) {
     char** argv = malloc(sizeof(char*) * (argc + 1));
 
     argc = 0;
-    FOREACH_VARARGS(char*, arg, ignore, {
+    FOREACH_VARARGS(char*, arg, capture, {
         if (arg[0] != '\0') {
             argv[argc] = arg;
             argc += 1;
@@ -292,17 +319,67 @@ void cmd_impl(int ignore, ...) {
     argv[argc] = NULL;
 
     va_list args;
-    va_start(args, ignore);
+    va_start(args, capture);
     const char* command_message = vconcat_sep_impl(" ", args);
     va_end(args);
-    printf("[CB][CMD] %s\n", command_message);
+    printf("[CB][INFO] %s\n", command_message);
 
-    coolbuild_exec(argv);
+    return coolbuild_exec(argv, capture);
 }
 
 #define CMD(...) cmd_impl(0, __VA_ARGS__, NULL)
+#define CMD_OUTPUT(...) cmd_impl(1, __VA_ARGS__, NULL)
 
-char** collect_args(char* fmt, ...) {
+static inline void run_command(char** argv) {
+    echo_cmd(argv);
+    coolbuild_exec(argv, false);
+}
+
+static inline char** split_args(const char* args) {
+    size_t argc = 0;
+    size_t length = strlen(args);
+    size_t start = 0;
+    for (size_t i = 0; i < length; i++) {
+        if (isspace(args[i]) && start < i) {
+            argc += 1;
+            while (isspace(args[i])) {
+                i += 1;
+            }
+            start = i;
+            i -= 1;
+        }
+    }
+    argc += 1;
+
+    char** argv = malloc(sizeof(char*) * (argc + 1));
+
+    argc = 0;
+    start = 0;
+    for (size_t i = 0; i < length; i++) {
+        if (isspace(args[i]) && start < i) {
+            argv[argc] = malloc(i - start + 1);
+            memcpy(argv[argc], args + start, i - start);
+            argv[argc][i - start] = '\0';
+            argc += 1;
+            while (isspace(args[i])) {
+                i += 1;
+            }
+            start = i;
+            i -= 1;
+        }
+    }
+    if (start < length) {
+        argv[argc] = malloc(length - start + 1);
+        memcpy(argv[argc], args + start, length - start);
+        argv[argc][length - start] = '\0';
+        argc += 1;
+    }
+    argv[argc] = NULL;
+
+    return argv;
+}
+
+static inline char** collect_args(char* fmt, ...) {
     size_t length = 0;
     va_list args;
     va_start(args, fmt);
@@ -349,144 +426,4 @@ char** collect_args(char* fmt, ...) {
     result[j] = NULL;
 
     return result;
-}
-
-typedef struct {
-    size_t offset;
-    size_t orig_length;
-    const char* new_value;
-    size_t new_value_len;
-} coolbuild__config_replacement_t;
-
-typedef BUFFER_TYPE(coolbuild__config_replacement_t) coolbuild__config_replacements_t;
-
-void configure_file_impl(const char* input, const char* output, ...) {
-    fprintf(stderr, "[CB][INFO] Configuring %s -> %s\n", input, output);
-
-    FILE* input_file = fopen(input, "rb");
-    if (input_file == NULL) {
-        fprintf(stderr, "[CB][ERROR] Could not open file '%s' for configuring: %s\n", input,
-                strerror(errno));
-        exit(1);
-    }
-
-    int fd = fileno(input_file);
-    struct stat statbuf;
-    if (fstat(fd, &statbuf) < 0) {
-        fprintf(stderr, "[CB][ERROR] Could not stat file '%s' for configuring: %s\n", input,
-                strerror(errno));
-        exit(1);
-    }
-
-    char* input_contents = malloc(statbuf.st_size + 1);
-    if (fread(input_contents, 1, statbuf.st_size, input_file) != (size_t)statbuf.st_size) {
-        fprintf(stderr, "[CB][ERROR] Could not read file '%s' for configuring: %s\n", input,
-                strerror(errno));
-        exit(1);
-    }
-    input_contents[statbuf.st_size] = '\0';
-    fclose(input_file);
-
-    // iterate keys and values
-    va_list args;
-    va_start(args, output);
-    coolbuild__config_replacements_t replacements = BUFFER_INIT;
-    while (true) {
-        const char* key = va_arg(args, const char*);
-        if (key == NULL) {
-            break;
-        }
-        const char* value = va_arg(args, const char*);
-        assert(value != NULL && "incorrect args passed to CONFIGURE_FILE");
-
-        // search the input string for @key@
-        const char* search_key = CONCAT("@", key, "@");
-        const char* iter = strstr(input_contents, search_key);
-        size_t search_key_len = strlen(search_key);
-        size_t value_len = strlen(value);
-
-        while (iter != NULL) {
-            // replace the key with the value
-            coolbuild__config_replacement_t replacement = {
-                    .offset = iter - input_contents,
-                    .orig_length = search_key_len,
-                    .new_value = value,
-                    .new_value_len = value_len,
-            };
-            BUFFER_PUSH(&replacements, replacement);
-
-            // search for the next key
-            iter = strstr(iter + search_key_len, search_key);
-        }
-    }
-
-    // replacements have been collected. apply them
-    size_t output_len = statbuf.st_size;
-    for (size_t i = 0; i < replacements.length; i++) {
-        coolbuild__config_replacement_t replacement = replacements.data[i];
-        output_len += replacement.new_value_len - replacement.orig_length;
-    }
-    char* output_contents = malloc(output_len + 1);
-    size_t output_offset = 0;
-    size_t input_offset = 0;
-    for (size_t i = 0; i < replacements.length; i++) {
-        coolbuild__config_replacement_t replacement = replacements.data[i];
-        // copy what's in between
-        memcpy(output_contents + output_offset, input_contents + input_offset,
-                replacement.offset - input_offset);
-        output_offset += replacement.offset - input_offset;
-        input_offset = replacement.offset + replacement.orig_length;
-
-        // copy the replacement
-        memcpy(output_contents + output_offset, replacement.new_value, replacement.new_value_len);
-        output_offset += replacement.new_value_len;
-    }
-
-    // copy remainder
-    memcpy(output_contents + output_offset, input_contents + input_offset,
-            statbuf.st_size - input_offset);
-
-    FILE* output_file = fopen(output, "wb");
-    if (output_file == NULL) {
-        fprintf(stderr, "[CB][ERROR] Could not open file '%s' for configuring: %s\n", output,
-                strerror(errno));
-        exit(1);
-    }
-
-    if (fwrite(output_contents, 1, output_len, output_file) != output_len) {
-        fprintf(stderr, "[CB][ERROR] Could not write file '%s' for configuring: %s\n", output,
-                strerror(errno));
-        exit(1);
-    }
-
-    fclose(output_file);
-}
-
-// usage: CONFIGURE_FILE("config.h.coolbuild_in", "config.h", "k1", "v1", "k2", "v2")
-#define CONFIGURE_FILE(input, output, ...) configure_file_impl(input, output, __VA_ARGS__, NULL)
-
-char* xstrdup(const char* str) {
-    size_t len = strlen(str);
-    char* result = malloc(len + 1);
-    memcpy(result, str, len + 1);
-    return result;
-}
-
-const char* curdir(void) {
-    static char* curdir = NULL;
-    if (curdir == NULL) {
-        char* dir = xstrdup(__FILE__);
-        char* last_slash = strrchr(dir, '/');
-        if (last_slash != NULL) {
-            *last_slash = '\0';
-        } else {
-            dir = ".";
-        }
-        curdir = malloc(PATH_MAX + 1);
-        if (realpath(dir, curdir) == NULL) {
-            fprintf(stderr, "[CB][ERROR] Could not get current directory: %s\n", strerror(errno));
-            exit(1);
-        }
-    }
-    return curdir;
 }

@@ -30,12 +30,12 @@ int main(int argc, char** argv) {
 
     char** link_cmd =
             collect_args("vpvv" LDFLAGS_FMT, cc(), objects, "-o", "build/snitch", LDFLAGS);
-    run_cmd(link_cmd);
+    run_command(link_cmd);
 
     if (argc > 1) {
         if (strcmp(argv[1], "run") == 0) {
             char** run_args = collect_args("vp", "build/snitch", &argv[2]);
-            run_cmd(run_args);
+            run_command(run_args);
         } else {
             fprintf(stderr, "Unknown subcommand: %s\n", argv[1]);
             return 1;
